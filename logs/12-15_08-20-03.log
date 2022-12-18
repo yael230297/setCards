@@ -1,0 +1,23 @@
+[2022-12-15 08:20:03] [INFO   ] cannot read configuration file config.properties trying from resources.
+[2022-12-15 08:20:03] [INFO   ] configuration file was loaded from resources directory.
+[2022-12-15 08:20:04] [INFO   ] Thread dealer starting.
+[2022-12-15 08:20:16] [SEVERE ] Key 87 was pressed by player 0
+[2022-12-15 08:20:27] [SEVERE ] placing card 45 in slot 0
+[2022-12-15 08:20:28] [SEVERE ] placing card 38 in slot 1
+[2022-12-15 08:20:28] [SEVERE ] placing card 18 in slot 2
+[2022-12-15 08:20:28] [SEVERE ] placing card 35 in slot 3
+[2022-12-15 08:20:28] [SEVERE ] placing card 43 in slot 4
+[2022-12-15 08:20:28] [SEVERE ] placing card 70 in slot 5
+[2022-12-15 08:20:28] [SEVERE ] placing card 47 in slot 6
+[2022-12-15 08:20:28] [SEVERE ] placing card 0 in slot 7
+[2022-12-15 08:20:28] [SEVERE ] placing card 65 in slot 8
+[2022-12-15 08:20:29] [SEVERE ] placing card 50 in slot 9
+[2022-12-15 08:20:29] [SEVERE ] placing card 22 in slot 10
+[2022-12-15 08:20:29] [SEVERE ] placing card 80 in slot 11
+[2022-12-15 08:20:34] [SEVERE ] Key 87 was pressed by player 0
+[2022-12-15 08:20:36] [SEVERE ] player 0 placing token on slot 1
+[2022-12-15 08:20:52] [SEVERE ] Key 85 was pressed by player 1
+[2022-12-15 08:20:54] [SEVERE ] player 1 placing token on slot 0
+[2022-12-15 08:21:02] [SEVERE ] Key 73 was pressed by player 1
+[2022-12-15 08:21:03] [SEVERE ] player 1 placing token on slot 1
+[2022-12-15 08:21:16] [SEVERE ] Key 85 was pressed by player 1

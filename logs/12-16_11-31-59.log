@@ -1,0 +1,4 @@
+[2022-12-16 11:31:59] [INFO   ] cannot read configuration file config.properties trying from resources.
+[2022-12-16 11:32:00] [INFO   ] configuration file was loaded from resources directory.
+[2022-12-16 11:32:00] [INFO   ] Thread playerstarting.
+[2022-12-16 11:32:00] [INFO   ] Thread computer-0 starting.
