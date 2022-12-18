@@ -58,6 +58,11 @@ public class Dealer implements Runnable {
     private LinkedList<Integer> cardsToRemove;
 
     /**
+     * The array of cards that needs be removed - save as cardId.
+     */
+    private LinkedList<Integer> slotsToFill;
+
+    /**
      * The current second of the current turn.
      */
     long currentSecond;
@@ -68,11 +73,6 @@ public class Dealer implements Runnable {
     private BlockingQueue<Integer> setQueue;
 
     private Thread dealerThread;
-
-    /**
-     * field that represent if the dealer needs to update the table (after remove cards\ in the first round) 
-     */
-    private boolean needToUpdate;
     
     private int[] playerFreeze;
     
@@ -87,8 +87,13 @@ public class Dealer implements Runnable {
         
         // ours // 
         cardsToRemove = new LinkedList<>();
+        slotsToFill = new LinkedList<>();
+        for(int i=0;i<env.config.tableSize;i++){
+            slotsToFill.add(i);
+        }
+        Collections.shuffle(slotsToFill);
+
         currentSecond = SIXTY_SECONDS_IN_MILIES;
-        needToUpdate = true;
         playerFreeze = new int[env.config.players];
         for(int i=0;i<playerFreeze.length;i++){
             playerFreeze[i]=0;
@@ -168,6 +173,8 @@ public class Dealer implements Runnable {
             for(int cardId : cardsToRemove){            
                 // remove tokens
                 int slot = table.cardToSlot[cardId];
+                slotsToFill.add(slot);
+
                 if(table.slotToCard[slot]!=null){
                     for(int playerId=0;playerId<players.length;playerId++){
                         if(tokens[playerId].contains(slot)){
@@ -180,7 +187,6 @@ public class Dealer implements Runnable {
                 }
             }
             cardsToRemove.clear();
-            needToUpdate = true;
         }
     }
 
@@ -190,17 +196,18 @@ public class Dealer implements Runnable {
     private void placeCardsOnTable() {
         Collections.shuffle(deck);
         synchronized(table.tableMonitor){
-            if(!needToUpdate){return;}
-            for(int slot=0; slot<table.slotToCard.length;slot++){
-                if(table.slotToCard[slot]==null){
+            if(slotsToFill.size()==0){return;}
+            
+            for(int slot: slotsToFill){
+                //if(table.slotToCard[slot]==null){
                     //check if there is no more cards to draw
                     if(!deck.isEmpty()){ 
                         int cardId = deck.remove(0);
                         this.table.placeCard(cardId, slot);
                     }
-                }
+                //}
             }
-            needToUpdate=false;
+            slotsToFill.clear();
         }
     }
 
@@ -255,16 +262,20 @@ public class Dealer implements Runnable {
         // remove all tokens
         synchronized(table.tableMonitor){
             removeAllTokensFromTable(table.getPlayersTokens());
-            for(int i=0; i< table.slotToCard.length;i++){
-                int cardId = table.slotToCard[i];
-                int slot = table.cardToSlot[cardId];
-                // remove card and return it to the deck
+            
+            for(int slot=0; slot< env.config.tableSize;slot++){
+                slotsToFill.add(slot);
                 if(table.slotToCard[slot]!=null){
-                    deck.add(cardId);
-                    table.removeCard(slot);
+                    int cardId = table.slotToCard[slot];
+                    
+                    // remove card and return it to the deck
+                    if(table.slotToCard[slot]!=null){
+                        deck.add(cardId);
+                        table.removeCard(slot);
+                    }
                 }
             }
-            needToUpdate=true;
+            Collections.shuffle(slotsToFill);
         } 
     }
 
