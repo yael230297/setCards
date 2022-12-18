@@ -41,7 +41,7 @@ public class Dealer implements Runnable {
     private final List<Integer> deck;
 
     /**
-     * True iff game should be terminated due to an external event.
+     * True if game should be terminated due to an external event.
      */
     private volatile boolean terminate;
 
@@ -53,7 +53,7 @@ public class Dealer implements Runnable {
     // ===== we added ====
 
     /**
-     * The array of cards to remove - save as cardId.
+     * The array of cards that needs be removed - save as cardId.
      */
     private LinkedList<Integer> cardsToRemove;
 
@@ -63,15 +63,19 @@ public class Dealer implements Runnable {
     long currentSecond;
 
     /**
-     * The queue for set checks requests. (holds players id).
+     * The queue for set checks requests (holds players id).
      */
     private BlockingQueue<Integer> setQueue;
 
     private Thread dealerThread;
 
+    /**
+     * field that represent if the dealer needs to update the table (after remove cards\ in the first round) 
+     */
     private boolean needToUpdate;
     
     private int[] playerFreeze;
+    
     Object playerFreezeMonitor = new Object();
 
     public Dealer(Env env, Table table, Player[] players) {
@@ -80,8 +84,8 @@ public class Dealer implements Runnable {
         this.players = players;
         reshuffleTime = System.currentTimeMillis() + SIXTY_SECONDS_IN_MILIES;
         deck = IntStream.range(0, env.config.deckSize).boxed().collect(Collectors.toList());
+        
         // ours // 
-       
         cardsToRemove = new LinkedList<>();
         currentSecond = SIXTY_SECONDS_IN_MILIES;
         needToUpdate = true;
@@ -101,14 +105,11 @@ public class Dealer implements Runnable {
         // creates and run the players threads 
         runPlayers();
         while (!shouldFinish()) {     
-            //terminate = true; // for test only
-            //start round
             placeCardsOnTable();
             timerLoop();
             updateTimerDisplay(true);
             removeAllCardsFromTable();
         }
-
         announceWinners();
         env.logger.log(Level.INFO, "Thread " + Thread.currentThread().getName() + " terminated.");
     }
@@ -136,9 +137,7 @@ public class Dealer implements Runnable {
         // close all players thread - call the terminate function
         for(Player player : players){
             player.terminate();
-            try{player.getThread().join(); } catch(InterruptedException ex){
-                System.out.println(ex);
-            }
+            try{player.getThread().join(); } catch(InterruptedException ex){}
         }
         terminate = true; 
     }
@@ -159,16 +158,15 @@ public class Dealer implements Runnable {
     private void removeCardsFromTable() {
         synchronized(table.tableMonitor){
             if(cardsToRemove.isEmpty()){return;}
-            LinkedList<Integer>[] tokens = table.getPlayersTokens();
-
-            // for each card need to be remove - remove tokens and then the card.
+            LinkedList<Integer>[] tokens = table.getPlayersTokens(); 
+            // for each card that needs to be remove:
             for(int cardId : cardsToRemove){            
                 // remove tokens
                 int slot = table.cardToSlot[cardId];
                 if(table.slotToCard[slot]!=null){
                     for(int playerId=0;playerId<players.length;playerId++){
                         if(tokens[playerId].contains(slot)){
-                            // remove token from player + table
+                            // remove token from the table field and the player's field
                             players[playerId].removeToken(slot);
                         }
                     }
@@ -190,7 +188,7 @@ public class Dealer implements Runnable {
             if(!needToUpdate){return;}
             for(int slot=0; slot<table.slotToCard.length;slot++){
                 if(table.slotToCard[slot]==null){
-                    //check if no more cards to draw
+                    //check if there is no more cards to draw
                     if(!deck.isEmpty()){ 
                         int cardId = deck.remove(0);
                         this.table.placeCard(cardId, slot);
@@ -205,7 +203,6 @@ public class Dealer implements Runnable {
      * Sleep for a fixed amount of time or until the thread is awakened for some purpose.
      */
     private void sleepUntilWokenOrTimeout() {
-        // TODO implement
         //sleep until timeout 
         try{Thread.sleep(950);}
         // thread interrupted - there is a set to check.
@@ -227,7 +224,7 @@ public class Dealer implements Runnable {
     }
 
     /**
-     * Update the players seconds to wait.
+     * Update the players seconds that they need to wait.
      */
     private void updatePlayers(){
         synchronized(playerFreezeMonitor){
@@ -250,13 +247,13 @@ public class Dealer implements Runnable {
      * Returns all the cards from the table to the deck.
      */
     private void removeAllCardsFromTable() {
-        // first remove all tokens
+        // remove all tokens
         synchronized(table.tableMonitor){
             removeAllTokensFromTable(table.getPlayersTokens());
             for(int i=0; i< table.slotToCard.length;i++){
                 int cardId = table.slotToCard[i];
                 int slot = table.cardToSlot[cardId];
-                // remove card and put back in deck
+                // remove card and return it to the deck
                 if(table.slotToCard[slot]!=null){
                     deck.add(cardId);
                     table.removeCard(slot);
@@ -301,7 +298,7 @@ public class Dealer implements Runnable {
 
     // ======= ours =======
     /**
-     * Remove all tokens, update in players and in table.
+     * Remove all tokens, update in players fields and in the table field.
      */
     public void removeAllTokensFromTable(LinkedList<Integer>[] tokens){
         for(Player player : players){
@@ -311,7 +308,7 @@ public class Dealer implements Runnable {
     }
 
     /**
-     * Remove token from card update in players and in table.
+     * Remove token from card and update in players fields and in the table field.
      */
     public void removeTokensFromCard(LinkedList<Integer>[] tokens, int slot){
         LinkedList<Player> playersOnCard = table.getPlayersOnCard(slot);
@@ -330,6 +327,7 @@ public class Dealer implements Runnable {
         }
     }
 
+    
     public void setThread(Thread thread){
         dealerThread = thread;
     }
@@ -337,15 +335,21 @@ public class Dealer implements Runnable {
         return dealerThread;
     }
 
+    /**
+     * check the set of the first player that asked for it.
+     * if he was right  -> give him a point, remove his cards and add time for freeze. 
+     * other -> give him a penelty and add time for freeze.
+     */
     
     public void checkSet(){
         
         int playerId = setQueue.poll();
         int [] set = table.getPlayerTokens(playerId);
         // if two players put tokens on the same legal set, the last player that put the token
-        // may have a set that is smaler then three. // TODO : make it pretty
+        // may have a set that is smaler then three. 
+        // TODO : make it pretty
         if(set.length < 3){ return; }
-
+        
         boolean isLegalSet = env.util.testSet(set);
         synchronized(playerFreezeMonitor){
             if(isLegalSet){
@@ -362,6 +366,9 @@ public class Dealer implements Runnable {
         }
     }
 
+    /**
+     * add the check set request to the set checks queue. 
+     */
     public void askToCheckSet(int playerId){
         setQueue.add(playerId);
     }

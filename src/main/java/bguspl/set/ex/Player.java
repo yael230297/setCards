@@ -5,7 +5,6 @@ import java.util.Queue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.logging.Level;
-
 import bguspl.set.Env;
 import bguspl.set.UserInterfaceImpl;
 import bguspl.set.UtilImpl;
@@ -60,6 +59,7 @@ public class Player implements Runnable {
     public int score;
 
     // ours //
+
     private Dealer dealer;  
 
     /**
@@ -69,7 +69,7 @@ public class Player implements Runnable {
     private BlockingQueue<Integer> keyPressedQueue;
 
     /**
-     * holds the player tokens.
+     * holds the player's tokens.
      */
     private LinkedList<Integer> myTokens;
 
@@ -80,7 +80,7 @@ public class Player implements Runnable {
 
 
      /**
-     * Should player sleep;
+     * Should the player sleep;
      */
     private boolean needToSleep;
 
@@ -115,18 +115,16 @@ public class Player implements Runnable {
         env.logger.log(Level.INFO, "Thread " + Thread.currentThread().getName() + "starting.");
         if (!human) createArtificialIntelligence();
             while (!terminate) {
-                synchronized(monitor){
-                    if(keyPressedQueue.isEmpty()){
-                        // sleep until key pressed
-                        try { monitor.wait(); } catch (InterruptedException ignored) {}
-                    }
-                    else{
-                        Integer slot = keyPressedQueue.poll();
-                        try{Thread.sleep(500);}catch(InterruptedException ex){}
-                        if(slot != null){
-                            keyPressed(slot);
-                            monitor.notify();
-                        }
+                
+                if(keyPressedQueue.isEmpty()){
+                    // sleep until key pressed
+                    //try { monitor.wait(); } catch (InterruptedException ignored) {}
+                }
+                else{
+                    Integer slot = keyPressedQueue.poll();
+                    if(slot != null){
+                        keyPressed(slot);
+                        //monitor.notify();
                     }
                 }
             }
@@ -139,24 +137,25 @@ public class Player implements Runnable {
      * Creates an additional thread for an AI (computer) player. The main loop of this thread repeatedly generates
      * key presses. If the queue of key presses is full, the thread waits until it is not full.
      */
+    // TODO : need to check why this thread run only once.
     private void createArtificialIntelligence() {
         // note: this is a very very smart AI (!)
         aiThread = new Thread(() -> {
             env.logger.log(Level.INFO, "Thread " + Thread.currentThread().getName() + " starting.");
                 while (!terminate) {
-                synchronized(monitor){
                     // create key press - random number from 0-11.
                     int slot = (int)(Math.random()*11);
                     // push to queue
+                synchronized(monitor){
                     if(keyPressedQueue.size() < 3){
                         keyPressedQueue.add(slot);
                         monitor.notify();
                     }
                 
                     if(keyPressedQueue.size()==3){ 
-                     try {
+                    try {
                         monitor.wait();
-                     } catch (InterruptedException ignored) {}
+                    } catch (InterruptedException ignored) {}
                     }
                 }
             }
@@ -180,17 +179,15 @@ public class Player implements Runnable {
      */
     public void keyPressed(int slot) {
         // check if place is not empty
-        synchronized(table.tableMonitor){
-            if(needToSleep || table.slotToCard[slot]==null){
-                return;
-            }
-            if(myTokens.contains(slot)){
-                removeToken(slot);
-            }
-            else{
-                placeToken(slot);
-            };
-    }
+        if(needToSleep || table.slotToCard[slot]==null){
+            return;
+        }
+        if(myTokens.contains(slot)){
+            removeToken(slot);
+        }
+        else{
+            placeToken(slot);
+        };  
     }
 
     /**
@@ -223,7 +220,10 @@ public class Player implements Runnable {
         // remove from table + ui 
         table.removeToken(id, slot);
     }
-
+   
+    /**
+     * place a token on the table and when the player put the third token ask for the desler to check the set. 
+     */
     public void placeToken(int slot) {
         if(myTokens.size() < MAX_TOKENS){
             myTokens.add(slot);

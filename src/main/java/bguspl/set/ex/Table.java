@@ -159,7 +159,10 @@ public class Table {
     public LinkedList<Integer>[] getPlayersTokens() {
         return tokens;
     }
-
+    
+    /**
+     * return the  players that have token on this card.
+     */
     public LinkedList<Player> getPlayersOnCard(int tokenSlot) {
         LinkedList<Player> players = new LinkedList<>();
         for(int i=0;i<players.size(); i++){
@@ -170,7 +173,10 @@ public class Table {
         return players;  
     }
 
-    void removeAllToken(){
+    /**
+     * removes all the token that are on the table (from the field).
+     */
+    public void removeAllToken(){
         tokens = new LinkedList[env.config.players];
         for(int i=0; i<env.config.players;i++){
             tokens[i]=new LinkedList<Integer>();
@@ -178,6 +184,9 @@ public class Table {
         env.ui.removeTokens();
     }
     
+    /**
+     * returns the player's tokens (his set).
+     */
     public int[] getPlayerTokens(int playerId){
         LinkedList<Integer> playerTokens = tokens[playerId];
         int[] set = new int[playerTokens.size()];
