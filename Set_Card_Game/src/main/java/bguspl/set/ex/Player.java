@@ -1,8 +1,14 @@
 package bguspl.set.ex;
 
+import java.util.LinkedList;
+import java.util.Queue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.logging.Level;
-
 import bguspl.set.Env;
+import bguspl.set.UserInterfaceDecorator;
+import bguspl.set.UserInterfaceSwing;
+import bguspl.set.UtilImpl;
 
 /**
  * This class manages the players' threads and data
@@ -11,7 +17,7 @@ import bguspl.set.Env;
  * @inv score >= 0
  */
 public class Player implements Runnable {
-
+    int MAX_TOKENS = 3;
     /**
      * The game environment object.
      */
@@ -50,7 +56,35 @@ public class Player implements Runnable {
     /**
      * The current score of the player.
      */
+    
     private int score;
+
+    // ours //
+
+    private Dealer dealer;  
+
+    /**
+     * Queue for pressed keys
+     */
+    // TODO : check if we need to lock this queue.
+    private BlockingQueue<Integer> keyPressedQueue;
+
+    /**
+     * holds the player's tokens.
+     */
+    private LinkedList<Integer> myTokens;
+
+     /**
+     * Monitor for synchronaize the ai and player threads.
+     */
+    private final Object monitor = new Object();
+
+
+     /**
+     * Should the player sleep;
+     */
+    private boolean needToSleep;
+
 
     /**
      * The class constructor.
@@ -66,6 +100,11 @@ public class Player implements Runnable {
         this.table = table;
         this.id = id;
         this.human = human;
+        this.keyPressedQueue = new LinkedBlockingQueue<Integer>();
+        this.myTokens = new LinkedList<>();
+        this.dealer = dealer;
+        this.needToSleep = false;
+
     }
 
     /**
@@ -76,10 +115,21 @@ public class Player implements Runnable {
         playerThread = Thread.currentThread();
         env.logger.log(Level.INFO, "Thread " + Thread.currentThread().getName() + "starting.");
         if (!human) createArtificialIntelligence();
-
-        while (!terminate) {
-            // TODO implement main player loop
-        }
+            while (!terminate) {
+                
+                if(keyPressedQueue.isEmpty()){
+                    // sleep until key pressed
+                    //try { monitor.wait(); } catch (InterruptedException ignored) {}
+                }
+                else{
+                    Integer slot = keyPressedQueue.poll();
+                    if(slot != null){
+                        keyPressed(slot);
+                        //monitor.notify();
+                    }
+                }
+            }
+        
         if (!human) try { aiThread.join(); } catch (InterruptedException ignored) {}
         env.logger.log(Level.INFO, "Thread " + Thread.currentThread().getName() + " terminated.");
     }
@@ -88,15 +138,27 @@ public class Player implements Runnable {
      * Creates an additional thread for an AI (computer) player. The main loop of this thread repeatedly generates
      * key presses. If the queue of key presses is full, the thread waits until it is not full.
      */
+    // TODO : need to check why this thread run only once.
     private void createArtificialIntelligence() {
         // note: this is a very very smart AI (!)
         aiThread = new Thread(() -> {
             env.logger.log(Level.INFO, "Thread " + Thread.currentThread().getName() + " starting.");
-            while (!terminate) {
-                // TODO implement player key press simulator
-                try {
-                    synchronized (this) { wait(); }
-                } catch (InterruptedException ignored) {}
+                while (!terminate) {
+                    // create key press - random number from 0-11.
+                    int slot = (int)(Math.random()*11);
+                    // push to queue
+                synchronized(monitor){
+                    if(keyPressedQueue.size() < 3){
+                        keyPressedQueue.add(slot);
+                        monitor.notify();
+                    }
+                
+                    if(keyPressedQueue.size()==3){ 
+                    try {
+                        monitor.wait();
+                    } catch (InterruptedException ignored) {}
+                    }
+                }
             }
             env.logger.log(Level.INFO, "Thread " + Thread.currentThread().getName() + " terminated.");
         }, "computer-" + id);
@@ -107,7 +169,8 @@ public class Player implements Runnable {
      * Called when the game should be terminated due to an external event.
      */
     public void terminate() {
-        // TODO implement
+        terminate = true;
+
     }
 
     /**
@@ -116,7 +179,16 @@ public class Player implements Runnable {
      * @param slot - the slot corresponding to the key pressed.
      */
     public void keyPressed(int slot) {
-        // TODO implement
+        // check if place is not empty
+        if(needToSleep || table.slotToCard[slot]==null){
+            return;
+        }
+        if(myTokens.contains(slot)){
+            removeToken(slot);
+        }
+        else{
+            placeToken(slot);
+        };  
     }
 
     /**
@@ -126,24 +198,63 @@ public class Player implements Runnable {
      * @post - the player's score is updated in the ui.
      */
     public void point() {
-        // TODO implement
-
-        int ignored = table.countCards(); // this part is just for demonstration in the unit tests
+        //int ignored = table.countCards(); // this part is just for demonstration in the unit tests
         env.ui.setScore(id, ++score);
+        env.ui.setFreeze(id, env.config.pointFreezeMillis);
+        needToSleep=true;
     }
 
     /**
      * Penalize a player and perform other related actions.
      */
     public void penalty() {
-        // TODO implement
+        env.ui.setFreeze(id, env.config.penaltyFreezeMillis);  
+        needToSleep=true;
     }
 
-    public int getScore() {
+    public int score() {
         return score;
     }
+
+    public void removeToken(int slot) {
+        myTokens.remove(myTokens.indexOf(slot));
+        // remove from table + ui 
+        table.removeToken(id, slot);
+    }
+   
+    /**
+     * place a token on the table and when the player put the third token ask for the desler to check the set. 
+     */
+    public void placeToken(int slot) {
+        if(myTokens.size() < MAX_TOKENS){
+            myTokens.add(slot);
+            table.placeToken(id, slot);
+            
+            if(myTokens.size() == MAX_TOKENS){
+                dealer.askToCheckSet(this.id);
+                dealer.getThread().interrupt();
+            }
+        } 
+        
+    }
+
+    public void clearTokens() {
+        myTokens.clear();
+    }
+
+    public void setThread(Thread thread){
+        playerThread = thread;
+    }
+
+    public void startThread(){
+        playerThread.start();
+    }
+
+    public Thread getThread(){
+       return playerThread;
+    }
+
+    public void wakeUp(){
+        needToSleep = false;
+     }
 }
-
-
-// TODO : add a function to request the dealer to check our set.
-// send the dealer the three cards int[] - size 3

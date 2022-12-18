@@ -2,7 +2,9 @@ package bguspl.set.ex;
 
 import bguspl.set.Env;
 
+import java.nio.file.FileSystemAlreadyExistsException;
 import java.util.Arrays;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -29,6 +31,19 @@ public class Table {
      */
     protected final Integer[] cardToSlot; // slot per card (if any)
 
+    // OURS // 
+
+    /**
+     * An array that holds the players tokens in the following way:
+     * each field in the array represent a player and has a linkedList that holds his tokens.
+     */
+    private LinkedList<Integer>[] tokens;
+
+    /**
+     * Monitor to lock table.
+     */
+    public Object tableMonitor = new Object();
+
     /**
      * Constructor for testing.
      *
@@ -41,6 +56,11 @@ public class Table {
         this.env = env;
         this.slotToCard = slotToCard;
         this.cardToSlot = cardToSlot;
+
+        tokens = new LinkedList[env.config.players];
+        for(int i=0; i<env.config.players;i++){
+            tokens[i]=new LinkedList<Integer>();
+        }
     }
 
     /**
@@ -94,8 +114,7 @@ public class Table {
         cardToSlot[card] = slot;
         slotToCard[slot] = card;
 
-        // TODO implement ??? 
-        // maybe we want to remove tokens .. ?
+        env.ui.placeCard(card, slot);
     }
 
     /**
@@ -106,8 +125,9 @@ public class Table {
         try {
             Thread.sleep(env.config.tableDelayMillis);
         } catch (InterruptedException ignored) {}
-
-        // TODO implement
+        
+        slotToCard[slot]=null;
+        env.ui.removeCard(slot);
     }
 
     /**
@@ -116,7 +136,8 @@ public class Table {
      * @param slot   - the slot on which to place the token.
      */
     public void placeToken(int player, int slot) {
-        // TODO implement
+        env.ui.placeToken(player, slot);
+        tokens[player].add(slot);
     }
 
     /**
@@ -126,7 +147,54 @@ public class Table {
      * @return       - true iff a token was successfully removed.
      */
     public boolean removeToken(int player, int slot) {
-        // TODO implement
+         // update tokens track of table        
+        this.tokens[player].remove(tokens[player].indexOf(slot));
+        env.ui.removeToken(player, slot);
         return false;
     }
+
+     /**
+     * gets all players tokens.
+     */
+    public LinkedList<Integer>[] getPlayersTokens() {
+        return tokens;
+    }
+    
+    /**
+     * return the  players that have token on this card.
+     */
+    public LinkedList<Player> getPlayersOnCard(int tokenSlot) {
+        LinkedList<Player> players = new LinkedList<>();
+        for(int i=0;i<players.size(); i++){
+            if(tokens[i].contains(tokenSlot)){
+                players.add(players.get(i));
+            }
+        }
+        return players;  
+    }
+
+    /**
+     * removes all the token that are on the table (from the field).
+     */
+    public void removeAllToken(){
+        tokens = new LinkedList[env.config.players];
+        for(int i=0; i<env.config.players;i++){
+            tokens[i]=new LinkedList<Integer>();
+        }
+        env.ui.removeTokens();
+    }
+    
+    /**
+     * returns the player's tokens (his set).
+     */
+    public int[] getPlayerTokens(int playerId){
+        LinkedList<Integer> playerTokens = tokens[playerId];
+        int[] set = new int[playerTokens.size()];
+
+        for(int i = 0; i < playerTokens.size(); i ++){
+            set[i] = slotToCard[playerTokens.get(i)];
+        }
+        return set;
+    }
+
 }
