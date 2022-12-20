@@ -61,7 +61,7 @@ public class Table {
         this.env = env;
         this.slotToCard = slotToCard;
         this.cardToSlot = cardToSlot;
-        this.isReachable = true;
+        this.isReachable = false;
         tokens = new LinkedList[env.config.players];
         for(int i=0; i<env.config.players;i++){
             tokens[i]=new LinkedList<Integer>();
@@ -192,6 +192,7 @@ public class Table {
     /**
      * returns the player's tokens (his set).
      */
+    // TOODO :ArrayIndexOutOfBoundsException
     public int[] getPlayerTokens(int playerId){
         LinkedList<Integer> playerTokens = tokens[playerId];
         int[] set = new int[playerTokens.size()];

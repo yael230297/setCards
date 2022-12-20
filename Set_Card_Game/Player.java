@@ -62,6 +62,8 @@ public class Player implements Runnable {
     // ours //
 
     private Dealer dealer;  
+// TODO : private
+    public long freezeTime;
 
     /**
      * Queue for pressed keys
@@ -77,7 +79,8 @@ public class Player implements Runnable {
      /**
      * Monitor for synchronaize the ai and player threads.
      */
-    private final Object monitor = new Object();
+    private final Object monitorPressedQueue = new Object();
+    private final Object playerMonitor = new Object();
 
 
      /**
@@ -104,6 +107,7 @@ public class Player implements Runnable {
         this.myTokens = new LinkedList<>();
         this.dealer = dealer;
         this.needToSleep = false;
+        this.freezeTime = 0;
 
     }
 
@@ -115,51 +119,61 @@ public class Player implements Runnable {
         playerThread = Thread.currentThread();
         env.logger.log(Level.INFO, "Thread " + Thread.currentThread().getName() + "starting.");
         if (!human) createArtificialIntelligence();
-            while (!terminate) {
-                
+        while (!terminate) {   
+            synchronized(monitorPressedQueue){
                 if(keyPressedQueue.isEmpty()){
-                    // sleep until key pressed
-                    //try { monitor.wait(); } catch (InterruptedException ignored) {}
-                }
-                else{
-                    Integer slot = keyPressedQueue.poll();
-                    if(slot != null){
-                        keyPressed(slot);
-                        //monitor.notify();
+                    try{monitorPressedQueue.wait();}catch(InterruptedException ex){
+                        if(terminate){break;}
+                        handelPress();
                     }
                 }
+                else{
+                    handelPress();
+                }
             }
+        }
         
-        if (!human) try { aiThread.join(); } catch (InterruptedException ignored) {}
+        if (!human) try { aiThread.join(); } catch (InterruptedException ignored){}
         env.logger.log(Level.INFO, "Thread " + Thread.currentThread().getName() + " terminated.");
+    }
+
+    public void handelPress(){
+        Integer slot = keyPressedQueue.poll();                    
+        monitorPressedQueue.notify();
+        if(slot != null){                        
+            slotChosen(slot);
+        }
     }
 
     /**
      * Creates an additional thread for an AI (computer) player. The main loop of this thread repeatedly generates
      * key presses. If the queue of key presses is full, the thread waits until it is not full.
      */
-    // TODO : need to check why this thread run only once.
     private void createArtificialIntelligence() {
         // note: this is a very very smart AI (!)
         aiThread = new Thread(() -> {
             env.logger.log(Level.INFO, "Thread " + Thread.currentThread().getName() + " starting.");
                 while (!terminate) {
                     // create key press - random number from 0-11.
-                    int slot = (int)(Math.random()*11);
+                    int slot = (int)(Math.random()*(env.config.tableSize-1));
                     // push to queue
-                synchronized(monitor){
-                    if(keyPressedQueue.size() < 3){
-                        keyPressedQueue.add(slot);
-                        monitor.notify();
-                    }
-                
-                    if(keyPressedQueue.size()==3){ 
-                    try {
-                        monitor.wait();
-                    } catch (InterruptedException ignored) {}
+                    synchronized(monitorPressedQueue){
+                        if(keyPressedQueue.size() < 3){
+                            keyPressedQueue.add(slot);
+                            try{Thread.sleep(100);}catch(InterruptedException ex){
+                                if(terminate){break;}
+                            }
+                            monitorPressedQueue.notify();
+                        }
+                    
+                        if(keyPressedQueue.size()==3){
+                            try{monitorPressedQueue.wait();}catch(InterruptedException ex){
+                                if(terminate){break;}
+                            }
+                        }
                     }
                 }
-            }
+
             env.logger.log(Level.INFO, "Thread " + Thread.currentThread().getName() + " terminated.");
         }, "computer-" + id);
         aiThread.start();
@@ -170,7 +184,10 @@ public class Player implements Runnable {
      */
     public void terminate() {
         terminate = true;
-
+        if(!human){
+            aiThread.interrupt();
+        }
+        playerThread.interrupt();
     }
 
     /**
@@ -179,8 +196,20 @@ public class Player implements Runnable {
      * @param slot - the slot corresponding to the key pressed.
      */
     public void keyPressed(int slot) {
+        if(human){
+            this.keyPressedQueue.add(slot);
+            playerThread.interrupt();
+        }
+    }
+
+    /**
+     * 
+     *
+     */
+    public void slotChosen(int slot) {
         // check if place is not empty
-        if(!table.isReachable() || needToSleep || table.slotToCard[slot]==null){
+        if(!table.isReachable() || needToSleep || 
+           table.slotToCard[slot]==null){
             return;
         }
         if(myTokens.contains(slot)){
@@ -199,17 +228,19 @@ public class Player implements Runnable {
      */
     public void point() {
         //int ignored = table.countCards(); // this part is just for demonstration in the unit tests
+        //needToSleep=true;
+        freezeTime = env.config.pointFreezeMillis;
         env.ui.setScore(id, ++score);
-        env.ui.setFreeze(id, env.config.pointFreezeMillis);
-        needToSleep=true;
+        env.ui.setFreeze(id, freezeTime);        
     }
 
     /**
      * Penalize a player and perform other related actions.
      */
-    public void penalty() {
-        env.ui.setFreeze(id, env.config.penaltyFreezeMillis);  
-        needToSleep=true;
+    public void penalty() { // marina entered here first
+        //needToSleep=true;
+        freezeTime = env.config.penaltyFreezeMillis;
+        env.ui.setFreeze(id, freezeTime);  
     }
 
     public int score() {
@@ -225,18 +256,35 @@ public class Player implements Runnable {
     /**
      * place a token on the table and when the player put the third token ask for the desler to check the set. 
      */
-    public void placeToken(int slot) {
-        if(myTokens.size() < MAX_TOKENS){
-            myTokens.add(slot);
-            table.placeToken(id, slot);
+    public void placeToken(int slot) { // meni first
+        synchronized(playerMonitor){
+            if(myTokens.size() < MAX_TOKENS){
+                myTokens.add(slot);
+                table.placeToken(id, slot);
             
-            if(myTokens.size() == MAX_TOKENS){
-                dealer.askToCheckSet(this.id);
-                dealer.getThread().interrupt();
+                if(myTokens.size() == MAX_TOKENS){
+                    needToSleep = true;
+                    dealer.askToCheckSet(this.id);
+                    dealer.getThread().interrupt();
+                    try{playerMonitor.wait();}catch(InterruptedException ex){
+                        if(terminate){return;}
+                    };
+                    keyPressedQueue.clear();
+                    }
+                    // player sleep until dealer retrun answer
+                }
             }
-        } 
-        
+        //} 
     }
+
+    // public void updateFreezeTime() {
+    //     while(freezeTime>0){
+    //         try{Thread.sleep(freezeTime);}catch(InterruptedException ex){}
+    //         //freezeTime-=1000;
+    //         //env.ui.setFreeze(id, freezeTime);
+    //     }
+    //     keyPressedQueue.clear();
+    // }
 
     public void clearTokens() {
         myTokens.clear();
@@ -254,7 +302,33 @@ public class Player implements Runnable {
        return playerThread;
     }
 
-    public void wakeUp(){
-        needToSleep = false;
-     }
+    // TODO change
+    public void continuePlay(){            
+            //keyPressedQueue.clear();
+            synchronized(playerMonitor){
+                playerMonitor.notify();
+            }
+            needToSleep = false;
+
+            // synchronized(monitor){
+            //     monitor.notify();
+            // }
+            
+    }
+
+
+    public void receiveSetTestResault(){
+        // synchronized(playerMonitor){
+        //     playerMonitor.notify();
+        // }       
+        playerThread.interrupt();
+    }
+
+    // void reduceFreezeTime(){
+    //     freezeTime--;
+    //     env.ui.setFreeze(id,freezeTime);  
+    //     if(freezeTime==0){
+    //         wakeUp();
+    //     }
+    // }
 }

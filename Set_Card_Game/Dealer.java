@@ -5,6 +5,7 @@ import bguspl.set.UtilImpl;
 import bguspl.set.WindowManager;
 
 import java.lang.reflect.Array;
+import java.text.BreakIterator;
 import java.util.Collections;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -15,8 +16,6 @@ import java.util.Queue;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-
-//import org.omg.CORBA.INTERNAL;
 
 /**
  * This class manages the dealer's threads and data
@@ -50,8 +49,6 @@ public class Dealer implements Runnable {
      */
     private long reshuffleTime = Long.MAX_VALUE;
 
-    // ===== we added ====
-
     /**
      * The array of cards that needs be removed - save as cardId.
      */
@@ -63,42 +60,48 @@ public class Dealer implements Runnable {
     private LinkedList<Integer> slotsToFill;
 
     /**
-     * The current second of the current turn.
-     */
-    long currentSecond;
-
-    /**
      * The queue for set checks requests (holds players id).
      */
     private BlockingQueue<Integer> setQueue;
 
+     /**
+     * delar thread - use to interrupt in case we want to check set.
+     */
     private Thread dealerThread;
     
-    private int[] playerFreeze;
+    /**
+     * An array of players that monitor their time left to freeze.
+     */
+    public long[] playerFreeze;
     
-    Object playerFreezeMonitor = new Object();
+    /**
+     * An object for synchronaized the player freeze array.
+     */
+    public Object playerFreezeMonitor = new Object();
+
 
     public Dealer(Env env, Table table, Player[] players) {
         this.env = env;
         this.table = table;
         this.players = players;
-        reshuffleTime = System.currentTimeMillis() + SIXTY_SECONDS_IN_MILIES;
-        deck = IntStream.range(0, env.config.deckSize).boxed().collect(Collectors.toList());
+        this.reshuffleTime = System.currentTimeMillis() + SIXTY_SECONDS_IN_MILIES;
+        this.deck = IntStream.range(0, env.config.deckSize).boxed().collect(Collectors.toList());
+        this.cardsToRemove = new LinkedList<>();
+        this.setQueue = new LinkedBlockingQueue<>();
         
-        // ours // 
-        cardsToRemove = new LinkedList<>();
-        slotsToFill = new LinkedList<>();
+        // first time we fill the table
+        this.slotsToFill = new LinkedList<>();
+
         for(int i=0;i<env.config.tableSize;i++){
             slotsToFill.add(i);
         }
         Collections.shuffle(slotsToFill);
 
-        currentSecond = SIXTY_SECONDS_IN_MILIES;
-        playerFreeze = new int[env.config.players];
+        // all players has 0 n freeze array.
+        playerFreeze = new long[env.config.players];
         for(int i=0;i<playerFreeze.length;i++){
             playerFreeze[i]=0;
         }
-        this.setQueue = new LinkedBlockingQueue<>();
     }
 
     /**
@@ -107,14 +110,15 @@ public class Dealer implements Runnable {
     @Override
     public void run() {
         env.logger.log(Level.INFO, "Thread " + Thread.currentThread().getName() + " starting.");
-        // creates and run the players threads s
         dealerThread = Thread.currentThread();
         runPlayers();
         while (!shouldFinish()) {     
             placeCardsOnTable();
+            // now all players can use table
             table.updateIsReachable(true);
             timerLoop();
             updateTimerDisplay(true);
+            // players can't use table
             table.updateIsReachable(false);
             removeAllCardsFromTable();
         }
@@ -128,15 +132,16 @@ public class Dealer implements Runnable {
     private void timerLoop() {
         reshuffleTime = System.currentTimeMillis() + SIXTY_SECONDS_IN_MILIES;
         updateTimerDisplay(false);
-        
         while (!terminate && System.currentTimeMillis() < reshuffleTime) {
-            sleepUntilWokenOrTimeout();
             updatePlayers();
+            sleepUntilWokenOrTimeout();
             updateTimerDisplay(false);
+            // players can't use table
             table.updateIsReachable(false);
             removeCardsFromTable();
             placeCardsOnTable();
             table.updateIsReachable(true);
+            // now all players can use table
         }
     }
 
@@ -144,12 +149,15 @@ public class Dealer implements Runnable {
      * Called when the game should be terminated due to an external event.
      */
     public void terminate() {
-        // close all players thread - call the terminate function
-        for(Player player : players){
-            player.terminate();
-            try{player.getThread().join(); } catch(InterruptedException ex){}
+        // close all players thread - call the terminate function in reverse order
+        // last created first closed
+        for(int i=players.length-1; i>=0;i--){
+            players[i].terminate();
+            try{players[i].getThread().join(); } catch(InterruptedException ex){
+            }
         }
-        terminate = true; 
+        terminate = true;
+        
     }
     
 
@@ -187,6 +195,17 @@ public class Dealer implements Runnable {
                 }
             }
             cardsToRemove.clear();
+
+            LinkedList<Integer> cards = new LinkedList<>();
+            for(int i=0; i<env.config.tableSize; i++){
+                if(table.slotToCard[i]!=null){
+                    cards.add(table.slotToCard[i]);
+                }
+            }
+
+            if(0==env.util.findSets(cards,1).size()){
+                terminate();
+            }
         }
     }
 
@@ -195,17 +214,21 @@ public class Dealer implements Runnable {
      */
     private void placeCardsOnTable() {
         Collections.shuffle(deck);
+        
         synchronized(table.tableMonitor){
+            // no more cards to play with
+            if(deck.size()+table.countCards()==0){
+                terminate();
+                return;
+            }
             if(slotsToFill.size()==0){return;}
             
             for(int slot: slotsToFill){
-                //if(table.slotToCard[slot]==null){
                     //check if there is no more cards to draw
                     if(!deck.isEmpty()){ 
                         int cardId = deck.remove(0);
                         this.table.placeCard(cardId, slot);
                     }
-                //}
             }
             slotsToFill.clear();
         }
@@ -229,31 +252,27 @@ public class Dealer implements Runnable {
     private void updateTimerDisplay(boolean reset) {
         if(reset){
             reshuffleTime = System.currentTimeMillis() + SIXTY_SECONDS_IN_MILIES;
+        }        
             env.ui.setCountdown(reshuffleTime - System.currentTimeMillis(), terminate);
-        }else{
-            env.ui.setCountdown(reshuffleTime - System.currentTimeMillis(), terminate);
-        }
     }
 
     /**
      * Update the players seconds that they need to wait.
      */
     private void updatePlayers(){
-        synchronized(playerFreezeMonitor){
-            for(Player player : players){
-                int playerId = player.id;
-                
-                if(playerFreeze[playerId]>0){
-                    playerFreeze[playerId]--;
-                    env.ui.setFreeze(playerId, playerFreeze[playerId]*1000);
-                    
-                    if(playerFreeze[playerId]==0){
-                        player.wakeUp();
-                    }
-                }
+        for(int i=0; i<env.config.players ;i++){
+            if(playerFreeze[i]==0){                    
+                players[i].continuePlay();
+                env.ui.setFreeze(i , playerFreeze[i]);
+
             }
+            if(playerFreeze[i]>0){
+                env.ui.setFreeze(i , playerFreeze[i]);
+                playerFreeze[i] -=1000;
+            }
+            
         }
-    }
+   }
 
     /**
      * Returns all the cards from the table to the deck.
@@ -357,27 +376,26 @@ public class Dealer implements Runnable {
      * other -> give him a penelty and add time for freeze.
      */
     
-    public void checkSet(){
-        
+    public void checkSet(){   
         int playerId = setQueue.poll();
         int [] set = table.getPlayerTokens(playerId);
-        // if two players put tokens on the same legal set, the last player that put the token
-        // may have a set that is smaler then three. 
-        // TODO : make it pretty
         if(set.length < 3){ return; }
-        
+        //if(playerFreeze[playerId]>0){return;}                    
         boolean isLegalSet = env.util.testSet(set);
+        
         synchronized(playerFreezeMonitor){
-            if(isLegalSet){
-                playerFreeze[playerId] += env.config.pointFreezeMillis/1000;
-                players[playerId].point();
-                for(int cardId : set){
-                    cardsToRemove.add(cardId);
-                }
+            if(!isLegalSet){
+                players[playerId].penalty();
+                env.ui.setFreeze(playerId , env.config.penaltyFreezeMillis);
+                playerFreeze[playerId]= env.config.penaltyFreezeMillis;
             }
             else{
-                playerFreeze[playerId] += env.config.penaltyFreezeMillis/1000;
-                players[playerId].penalty();
+                players[playerId].point();
+                env.ui.setFreeze(playerId , env.config.pointFreezeMillis);
+                playerFreeze[playerId] = env.config.pointFreezeMillis;
+                for(int cardId : set){
+                    cardsToRemove.add(cardId);
+                }    
             }
         }
     }
